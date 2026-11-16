@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>華京物業 - 區分所有權人會議出席與投票統計</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 SheetJS 用於解析與匯出 Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc;
+        }
+        /* 自訂捲軸樣式 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        .unit-btn {
+            transition: all 0.12s ease-in-out;
+            user-select: none;
+        }
+        .unit-btn:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col">
+
+    <!-- 頂部導覽列 -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+        <div class="max-w-[1600px] mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+            <!-- 左側品牌與標題 -->
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-black text-xl shadow-sm flex-shrink-0">
+                    🏢
+                </div>
+                <h1 class="text-base md:text-lg font-extrabold text-slate-800 whitespace-nowrap tracking-tight">
+                    華京物業 - 區分所有權人會議出席與投票統計
+                </h1>
+            </div>
+
+            <!-- 中間社區名稱輸入框 (移除多餘字樣與下拉選單，僅保留醒目輸入框) -->
+            <div class="bg-blue-50/80 border-2 border-blue-200 rounded-2xl px-3 py-1.5 flex items-center shadow-inner">
+                <input id="community-name-input" type="text" value="社區名稱" 
+                    oninput="updateCommunityName(this.value)"
+                    placeholder="請輸入社區名稱"
+                    class="bg-white border border-blue-200 rounded-xl px-4 py-1.5 text-lg md:text-2xl font-black text-blue-700 text-center focus:outline-none focus:ring-2 focus:ring-blue-500 w-56 md:w-80 shadow-sm" />
+            </div>
+
+            <!-- 右側頁籤切換與儲存按鈕 -->
+            <div class="flex items-center gap-2 flex-wrap">
+                <div class="bg-slate-100 p-1 rounded-xl flex items-center border border-slate-200">
+                    <button id="tab-btn-attendance" onclick="switchTab('attendance')" 
+                        class="px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold transition whitespace-nowrap bg-white text-blue-600 shadow-sm">
+                        1. 出席點名與檢核
+                    </button>
+                    <button id="tab-btn-voting" onclick="switchTab('voting')" 
+                        class="px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold transition whitespace-nowrap text-slate-600 hover:text-slate-900">
+                        2. 議案投票統計
+                    </button>
+                    <button id="tab-btn-guide" onclick="switchTab('guide')" 
+                        class="px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold transition whitespace-nowrap text-slate-600 hover:text-slate-900">
+                        📖 使用說明
+                    </button>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <span id="auto-save-status" class="text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg hidden md:inline-block whitespace-nowrap">
+                        ✓ 已自動儲存
+                    </span>
+                    <button onclick="manualSave()" 
+                        class="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs md:text-sm px-4 py-2.5 rounded-xl shadow-sm transition flex items-center gap-1.5 whitespace-nowrap">
+                        💾 儲存進度
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主內容區 -->
+    <main class="flex-1 max-w-[1600px] w-full mx-auto px-3 md:px-6 py-4">
+
+        <!-- ==================== 頁籤 1：出席點名與檢核 ==================== -->
+        <section id="page-attendance" class="space-y-4">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+                
+                <!-- 左側：社區戶數與專有面積清單 (佔 8 欄) -->
+                <div class="lg:col-span-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col">
+                    <!-- 工具列 -->
+                    <div class="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-100">
+                        <div>
+                            <h2 class="text-base md:text-lg font-extrabold text-slate-800 flex items-center gap-2">
+                                📋 社區戶數與專有面積清單
+                                <span class="text-xs font-normal text-slate-500">(點擊戶別切換出席；點擊左側 A1~A7 管理該戶型)</span>
+                            </h2>
+                        </div>
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            <button onclick="downloadExcelTemplate()" class="px-2.5 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition">
+                                📥 範本下載
+                            </button>
+                            <label class="px-2.5 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">
+                                📂 匯入名單 Excel
+                                <input type="file" id="excel-upload" accept=".xlsx,.xls,.csv" class="hidden" onchange="importExcel(event)" />
+                            </label>
+                            <button onclick="openBatchAddModal()" class="px-2.5 py-1.5 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg transition">
+                                ➕ 批量新增
+                            </button>
+                            <button onclick="openSingleAddModal()" class="px-2.5 py-1.5 text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg transition">
+                                + 單筆新增
+                            </button>
+                            <button onclick="openClearAllUnitsModal()" class="px-2.5 py-1.5 text-xs font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg transition">
+                                🗑️ 清空全部
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 快速全選/全取消與圖例 -->
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-3 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/70">
+                        <div class="flex items-center gap-4 text-xs font-bold">
+                            <span class="flex items-center gap-1.5 text-slate-600">
+                                <span class="w-4 h-4 rounded bg-slate-100 border border-slate-300 inline-block"></span> 未出席
+                            </span>
+                            <span class="flex items-center gap-1.5 text-emerald-700">
+                                <span class="w-4 h-4 rounded bg-emerald-500 inline-block"></span> 已出席 (含委託)
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="confirmMarkAllAttendance(true)" class="px-2.5 py-1 text-xs font-bold bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-lg transition">
+                                全體標示出席
+                            </button>
+                            <button onclick="confirmMarkAllAttendance(false)" class="px-2.5 py-1 text-xs font-bold bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg transition">
+                                全體取消出席
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 樓層矩陣容器 (自適應寬度，不出現橫向捲軸) -->
+                    <div id="attendance-matrix" class="space-y-2 w-full"></div>
+                </div>
+
+                <!-- 右側：即時統計與法定門檻檢核 (佔 4 欄) -->
+                <div class="lg:col-span-4 space-y-4">
+                    <!-- 出席數據總覽卡片 -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-4">
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <h3 class="text-base font-extrabold text-slate-800">📊 出席率即時統計結果</h3>
+                            <span id="stat-community-badge" class="text-xs font-bold bg-blue-50 text-blue-700 px-2.5 py-1 rounded-lg border border-blue-200">社區名稱</span>
+                        </div>
+
+                        <!-- 人數與面積雙指標 -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                                <div class="text-xs font-bold text-slate-500">出席戶數 / 總戶數</div>
+                                <div class="mt-1 flex items-baseline gap-1">
+                                    <span id="att-present-count" class="text-2xl font-black text-blue-600">0</span>
+                                    <span class="text-xs text-slate-400 font-bold">/ <span id="att-total-count">0</span> 戶</span>
+                                </div>
+                                <div class="mt-1.5 text-sm font-black text-slate-700">
+                                    比例：<span id="att-count-pct" class="text-blue-600">0.00%</span>
+                                </div>
+                            </div>
+
+                            <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                                <div class="text-xs font-bold text-slate-500">出席面積 / 總面積</div>
+                                <div class="mt-1 flex items-baseline gap-1">
+                                    <span id="att-present-area" class="text-xl font-black text-indigo-600">0.00</span>
+                                    <span class="text-xs text-slate-400 font-bold">/ <span id="att-total-area">0.00</span></span>
+                                </div>
+                                <div class="mt-1.5 text-sm font-black text-slate-700">
+                                    比例：<span id="att-area-pct" class="text-indigo-600">0.00%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 三個法定出席門檻檢核 (統一格式、未達標無色、已達標打勾醒目、顯示應到人數與面積) -->
+                        <div class="space-y-2.5 pt-1">
+                            <div class="text-xs font-bold text-slate-500">法定出席門檻檢核（須人數與面積同時達標）：</div>
+
+                            <!-- 門檻一：三分之二 -->
+                            <div id="box-thresh-2-3" class="rounded-xl p-3.5 border border-slate-200 bg-slate-50 transition">
+                                <div class="font-extrabold text-sm text-slate-700" id="title-thresh-2-3">
+                                    一、三分之二門檻 (≥ 66.67%)
+                                </div>
+                                <div class="text-xs font-bold text-slate-500 mt-1" id="req-thresh-2-3">
+                                    應到門檻：0 戶 / 面積 0.00
+                                </div>
+                                <div class="text-xs md:text-sm font-bold text-slate-500 mt-1" id="status-thresh-2-3">
+                                    ○ 未達標 ( 人數 0.00% / 面積 0.00% )
+                                </div>
+                            </div>
+
+                            <!-- 門檻二：二分之一 -->
+                            <div id="box-thresh-1-2" class="rounded-xl p-3.5 border border-slate-200 bg-slate-50 transition">
+                                <div class="font-extrabold text-sm text-slate-700" id="title-thresh-1-2">
+                                    二、二分之一門檻 (> 50%)
+                                </div>
+                                <div class="text-xs font-bold text-slate-500 mt-1" id="req-thresh-1-2">
+                                    應到門檻：0 戶 / 面積 0.00
+                                </div>
+                                <div class="text-xs md:text-sm font-bold text-slate-500 mt-1" id="status-thresh-1-2">
+                                    ○ 未達標 ( 人數 0.00% / 面積 0.00% )
+                                </div>
+                            </div>
+
+                            <!-- 門檻三：五分之一 -->
+                            <div id="box-thresh-1-5" class="rounded-xl p-3.5 border border-slate-200 bg-slate-50 transition">
+                                <div class="font-extrabold text-sm text-slate-700" id="title-thresh-1-5">
+                                    三、五分之一門檻 (≥ 20%)
+                                </div>
+                                <div class="text-xs font-bold text-slate-500 mt-1" id="req-thresh-1-5">
+                                    應到門檻：0 戶 / 面積 0.00
+                                </div>
+                                <div class="text-xs md:text-sm font-bold text-slate-500 mt-1" id="status-thresh-1-5">
+                                    ○ 未達標 ( 人數 0.00% / 面積 0.00% )
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ==================== 頁籤 2：議案投票統計 ==================== -->
+        <section id="page-voting" class="space-y-4 hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+
+                <!-- 左側：議案投票點選矩陣 (佔 8 欄) -->
+                <div class="lg:col-span-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col">
+                    <div class="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-100">
+                        <div>
+                            <h2 class="text-base md:text-lg font-extrabold text-slate-800">
+                                🗳️ 議案投票表決點選
+                                <span class="text-xs font-normal text-slate-500">(僅已出席戶可投票；點擊左側 A1~A7 可補標示樓層出席)</span>
+                            </h2>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input id="agenda-title-input" type="text" value="議案名稱" 
+                                oninput="updateAgendaTitle(this.value)"
+                                class="border border-slate-300 rounded-xl px-3 py-1.5 text-xs md:text-sm font-bold text-slate-800 w-56 md:w-72 focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                                placeholder="輸入目前表決議案名稱..." />
+                        </div>
+                    </div>
+
+                    <!-- 投票操作快捷列 -->
+                    <div class="flex flex-wrap items-center justify-between gap-2 mb-3 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/70">
+                        <div class="flex items-center gap-4 text-xs font-bold">
+                            <span class="flex items-center gap-1.5 text-slate-400">
+                                <span class="w-4 h-4 rounded bg-slate-100 border border-slate-200 inline-block"></span> 未出席(鎖定)
+                            </span>
+                            <span class="flex items-center gap-1.5 text-slate-700">
+                                <span class="w-4 h-4 rounded bg-white border-2 border-slate-400 inline-block"></span> 已出席未投票
+                            </span>
+                            <span class="flex items-center gap-1.5 text-blue-700">
+                                <span class="w-4 h-4 rounded bg-blue-600 inline-block"></span> 同意票
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="confirmMarkAllVotes(true)" class="px-2.5 py-1 text-xs font-bold bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg transition">
+                                已出席全數同意
+                            </button>
+                            <button onclick="confirmMarkAllVotes(false)" class="px-2.5 py-1 text-xs font-bold bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg transition">
+                                清空本案投票
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 投票矩陣容器 -->
+                    <div id="voting-matrix" class="space-y-2 w-full"></div>
+                </div>
+
+                <!-- 右側：議案投票統計結果 (佔 4 欄) -->
+                <div class="lg:col-span-4 space-y-4">
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-4">
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <h3 class="text-base font-extrabold text-slate-800">📈 議案投票統計結果</h3>
+                            <span class="text-xs font-bold bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-lg border border-indigo-200">本次會議出席總數</span>
+                        </div>
+
+                        <!-- 同意票數與同意面積 -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                                <div class="text-xs font-bold text-slate-500">同意戶數 / 出席總戶數</div>
+                                <div class="mt-1 flex items-baseline gap-1">
+                                    <span id="vote-agree-count" class="text-2xl font-black text-blue-600">0</span>
+                                    <span class="text-xs text-slate-400 font-bold">/ <span id="vote-present-count">0</span> 戶</span>
+                                </div>
+                                <div class="mt-1.5 text-sm font-black text-slate-700">
+                                    占出席：<span id="vote-count-pct" class="text-blue-600">0.00%</span>
+                                </div>
+                            </div>
+
+                            <div class="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                                <div class="text-xs font-bold text-slate-500">同意面積 / 出席總面積</div>
+                                <div class="mt-1 flex items-baseline gap-1">
+                                    <span id="vote-agree-area" class="text-xl font-black text-indigo-600">0.00</span>
+                                    <span class="text-xs text-slate-400 font-bold">/ <span id="vote-present-area">0.00</span></span>
+                                </div>
+                                <div class="mt-1.5 text-sm font-black text-slate-700">
+                                    占出席：<span id="vote-area-pct" class="text-indigo-600">0.00%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 兩個法定決議門檻 (比照第一頁顯示應到人數與面積) -->
+                        <div class="space-y-2.5 pt-1">
+                            <div class="text-xs font-bold text-slate-500">法定決議門檻檢核（以本次會議出席總數為分母）：</div>
+
+                            <!-- 決議門檻一：四分之三 -->
+                            <div id="box-vote-3-4" class="rounded-xl p-3.5 border border-slate-200 bg-slate-50 transition">
+                                <div class="font-extrabold text-sm text-slate-700" id="title-vote-3-4">
+                                    一、重大決議：四分之三門檻 (≥ 75%)
+                                </div>
+                                <div class="text-xs font-bold text-slate-500 mt-1" id="req-vote-3-4">
+                                    應同意門檻：0 戶 / 面積 0.00
+                                </div>
+                                <div class="text-xs md:text-sm font-bold text-slate-500 mt-1" id="status-vote-3-4">
+                                    ○ 未達標 ( 人數 0.00% / 面積 0.00% )
+                                </div>
+                            </div>
+
+                            <!-- 決議門檻二：二分之一 -->
+                            <div id="box-vote-1-2" class="rounded-xl p-3.5 border border-slate-200 bg-slate-50 transition">
+                                <div class="font-extrabold text-sm text-slate-700" id="title-vote-1-2">
+                                    二、一般決議：二分之一門檻 (> 50%)
+                                </div>
+                                <div class="text-xs font-bold text-slate-500 mt-1" id="req-vote-1-2">
+                                    應同意門檻：0 戶 / 面積 0.00
+                                </div>
+                                <div class="text-xs md:text-sm font-bold text-slate-500 mt-1" id="status-vote-1-2">
+                                    ○ 未達標 ( 人數 0.00% / 面積 0.00% )
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ==================== 頁籤 3：使用說明 ==================== -->
+        <section id="page-guide" class="hidden max-w-3xl mx-auto">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                    <h2 class="text-xl font-black text-slate-800">📖 使用說明</h2>
+                    <button onclick="confirmLoadSampleData()" class="px-3.5 py-2 text-xs md:text-sm font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl shadow-xs transition flex items-center gap-1.5">
+                        🔄 載入範例 (A1~A7)
+                    </button>
+                </div>
+                <div class="space-y-3 text-sm text-slate-600 leading-relaxed">
+                    <div class="p-4 bg-blue-50 rounded-xl border border-blue-200 text-blue-900">
+                        <p class="font-bold text-base mb-1">💡 如何在同一台電腦統計多個不同社區？</p>
+                        <p>本工具採用「依據 HTML 檔案路徑與檔名自動獨立綁定儲存空間」機制。若您要同時統計兩個以上社區，只需將本網頁 HTML 檔案複製成兩份並取不同檔名（例如：<code class="bg-white px-1.5 py-0.5 rounded border">華京社區.html</code> 與 <code class="bg-white px-1.5 py-0.5 rounded border">帝寶社區.html</code>），分別開啟後，它們的社區名單、專有面積與點名進度就會<strong>100% 各自獨立儲存、互不影響</strong>！</p>
+                    </div>
+                    <p><strong>1. 自動與手動儲存：</strong> 每次點選出席、修改面積或投票，系統皆會在背景自動儲存於本機瀏覽器中；點擊右上角「💾 儲存進度」也會顯示「儲存成功」確認提示。</p>
+                    <p><strong>2. 戶型快速管理：</strong> 在第一頁點擊左側深色戶型按鈕（如 A1~A7），可針對該戶型執行「全棟標示已出席」、「全棟取消已出席」、「刪除指定樓層」、「刪除整棟戶型」、「單筆或批量新增該戶型樓層」。</p>
+                    <p><strong>3. 投票頁快速補報到：</strong> 在第二頁「議案投票統計」點擊左側深色戶型按鈕（如 A1~A7），可直接選擇某樓層標示為已出席，立即加入投票母數中。</p>
+                    <p><strong>4. 載入預設範例：</strong> 若需要測試或重置為預設格局，可點擊本頁右上方的「🔄 載入範例 (A1~A7)」按鈕，系統將載入 A1～A7（各 10 樓，共 70 戶）的範例資料。</p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- 底部頁尾 -->
+    <footer class="bg-white border-t border-slate-200 mt-auto py-3 px-4 text-center text-xs text-slate-500">
+        <span id="footer-community-name" class="font-bold text-slate-700">社區名稱</span> — 區分所有權人會議出席率計算與檢核系統
+    </footer>
+
+    <!-- ==================== 彈出視窗 (Modals) ==================== -->
+
+    <!-- 1. 通用訊息提示 Modal (取代 alert) -->
+    <div id="msg-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200 text-center space-y-4">
+            <div id="msg-modal-text" class="text-lg font-extrabold text-slate-800 whitespace-pre-line"></div>
+            <button onclick="closeMsgModal()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-sm transition">
+                確定
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. 第一頁：點擊戶型 (A1~A7) 六大管理功能選單 Modal -->
+    <div id="bldg-action-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-xl border border-slate-200 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 class="text-lg font-black text-slate-800">
+                    🏢 戶型【<span id="bldg-modal-title" class="text-blue-600">A1</span>】管理選單
+                </h3>
+                <button onclick="closeBuildingActionModal()" class="text-slate-400 hover:text-slate-600 font-bold text-xl leading-none">✕</button>
+            </div>
+
+            <!-- 六個功能選項列表 -->
+            <div id="bldg-action-list" class="space-y-2">
+                <button onclick="bldgActionMarkAll(true)" class="w-full text-left px-4 py-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 font-bold text-sm flex items-center justify-between transition border border-emerald-200">
+                    <span>一、將該戶型所有樓層標示已出席</span>
+                    <span>✓</span>
+                </button>
+                <button onclick="bldgActionMarkAll(false)" class="w-full text-left px-4 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-sm flex items-center justify-between transition border border-slate-200">
+                    <span>二、將該戶型所有樓層取消已出席</span>
+                    <span>○</span>
+                </button>
+                <button onclick="bldgActionShowDeleteFloor()" class="w-full text-left px-4 py-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-sm flex items-center justify-between transition border border-amber-200">
+                    <span>三、刪除該戶型的某一樓層</span>
+                    <span>🗑️</span>
+                </button>
+                <button onclick="bldgActionConfirmDeleteBldg()" class="w-full text-left px-4 py-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 font-bold text-sm flex items-center justify-between transition border border-rose-200">
+                    <span>四、刪除該戶型</span>
+                    <span>⚠️</span>
+                </button>
+                <button onclick="bldgActionOpenSingleAdd()" class="w-full text-left px-4 py-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold text-sm flex items-center justify-between transition border border-blue-200">
+                    <span>五、新增該戶型某一樓</span>
+                    <span>＋</span>
+                </button>
+                <button onclick="bldgActionOpenBatchAdd()" class="w-full text-left px-4 py-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 font-bold text-sm flex items-center justify-between transition border border-indigo-200">
+                    <span>六、批量新增該戶型樓層</span>
+                    <span>➕</span>
+                </button>
+            </div>
+
+            <!-- 子畫面：選擇要刪除的單一樓層 -->
+            <div id="bldg-sub-delete-floor" class="hidden space-y-3">
+                <div class="text-xs font-bold text-amber-800 bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+                    請點擊下方欲刪除的樓層按鈕（點擊後立即刪除該樓層）：
+                </div>
+                <div id="bldg-delete-floor-grid" class="grid grid-cols-5 gap-2 max-h-60 overflow-y-auto p-1"></div>
+                <button onclick="backToBldgActionList()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs">
+                    ← 返回戶型選單
+                </button>
+            </div>
+
+            <!-- 子畫面：確認刪除整棟戶型 -->
+            <div id="bldg-sub-confirm-delete" class="hidden space-y-3 text-center">
+                <div class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 font-bold text-sm">
+                    確定要刪除整個【<span id="bldg-confirm-del-name"></span>】戶型及其所有樓層嗎？
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="backToBldgActionList()" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm">
+                        取消
+                    </button>
+                    <button onclick="executeDeleteBuilding()" class="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-sm">
+                        確定刪除整棟
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 第二頁（議案投票統計）：點擊戶型選擇某樓層標示為已出席 Modal -->
+    <div id="voting-bldg-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-xl border border-slate-200 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 class="text-lg font-black text-slate-800">
+                    🏢 選擇【<span id="voting-bldg-modal-title" class="text-blue-600">A1</span>】樓層標示為已出席
+                </h3>
+                <button onclick="closeVotingBuildingModal()" class="text-slate-400 hover:text-slate-600 font-bold text-xl leading-none">✕</button>
+            </div>
+            <p class="text-xs font-bold text-slate-500">
+                點擊下方樓層即可切換「已出席（綠燈）」狀態，標示出席後即可直接參與本案投票：
+            </p>
+            <div id="voting-bldg-floor-grid" class="grid grid-cols-5 gap-2 max-h-64 overflow-y-auto p-1"></div>
+            <button onclick="closeVotingBuildingModal()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition">
+                完成
+            </button>
+        </div>
+    </div>
+
+    <!-- 4. 單筆新增戶別 Modal -->
+    <div id="single-add-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-xl border border-slate-200 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 class="text-base font-black text-slate-800">+ 單筆新增戶別</h3>
+                <button onclick="closeSingleAddModal()" class="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+            </div>
+            <div class="space-y-3 text-sm">
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">戶型 / 棟別名稱 (例如 A1)</label>
+                    <input id="single-bldg-input" type="text" placeholder="A1" class="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold" />
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">樓層 (數字，例如 11)</label>
+                    <input id="single-floor-input" type="number" placeholder="11" class="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold" />
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">專有面積 (坪或平方公尺)</label>
+                    <input id="single-area-input" type="number" step="0.01" value="35.5" class="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold" />
+                </div>
+            </div>
+            <div class="flex gap-2 pt-2">
+                <button onclick="closeSingleAddModal()" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm">取消</button>
+                <button onclick="submitSingleAdd()" class="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm">確認新增</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. 批量新增戶別 Modal -->
+    <div id="batch-add-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-xl border border-slate-200 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 class="text-base font-black text-slate-800">➕ 批量新增樓層</h3>
+                <button onclick="closeBatchAddModal()" class="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
+            </div>
+            <div class="space-y-3 text-sm">
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">戶型 / 棟別名稱 (例如 A1 或 A8)</label>
+                    <input id="batch-bldg-input" type="text" placeholder="A8" class="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold" />
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">起始樓層</label>
+                        <input id="batch-start-floor" type="number" value="1" class="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold" />
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-600 mb-1">結束樓層</label>
+                        <input id="batch-end-floor" type="number" value="10" class="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold" />
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">每戶預設專有面積</label>
+                    <input id="batch-area-input" type="number" step="0.01" value="35.5" class="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold" />
+                </div>
+            </div>
+            <div class="flex gap-2 pt-2">
+                <button onclick="closeBatchAddModal()" class="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm">取消</button>
+                <button onclick="submitBatchAdd()" class="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm">批量建立</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 6. 確認清空全部戶別 Modal -->
+    <div id="clear-all-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-xl border border-slate-200 space-y-4 text-center">
+            <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto text-2xl">
+                ⚠️
+            </div>
+            <h3 class="text-base font-black text-slate-800">確定要清空所有戶別嗎？</h3>
+            <p class="text-xs font-bold text-slate-500 leading-relaxed">
+                此操作將會刪除目前清單中的所有戶型與樓層資料（清空後可重新新增或匯入 Excel）。
+            </p>
+            <div class="flex gap-2 pt-1">
+                <button onclick="closeClearAllUnitsModal()" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition">
+                    取消
+                </button>
+                <button onclick="executeClearAllUnits()" class="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-sm transition">
+                    確定清空全部
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. 通用二次確認提醒 Modal (用於全體標示出席/取消出席/已出席全數同意/清空本案投票) -->
+    <div id="confirm-action-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-xl border border-slate-200 space-y-4 text-center">
+            <div id="confirm-action-icon" class="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto text-2xl">
+                ❓
+            </div>
+            <h3 id="confirm-action-title" class="text-base font-black text-slate-800">確認執行操作？</h3>
+            <p id="confirm-action-desc" class="text-xs font-bold text-slate-500 leading-relaxed"></p>
+            <div class="flex gap-2 pt-1">
+                <button onclick="closeConfirmActionModal()" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition">
+                    取消
+                </button>
+                <button id="confirm-action-submit-btn" onclick="executeConfirmedAction()" class="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm transition">
+                    確定
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== JavaScript 核心邏輯 ==================== -->
+    <script>
+        /**
+         * 依據目前 HTML 檔案路徑 (window.location.pathname) 綁定獨立的 LocalStorage Key，
+         * 確保電腦上下載多個不同檔名的 HTML 時，各社區的清單與進度完全獨立不互相同步，
+         * 且重新整理或關閉重開同一個 HTML 檔案時，能 100% 恢復儲存進度。
+         */
+        function getFileStorageKey() {
+            const path = decodeURIComponent(window.location.pathname || 'default_condo_app');
+            return 'HUAJING_CONDO_STATE_V5__' + path;
+        }
+
+        // 應用程式狀態
+        let appState = {
+            communityName: '社區名稱',
+            agendaTitle: '議案名稱',
+            units: [] // { id, building, floor, area, attended, voted }
+        };
+
+        let currentManagingBuilding = null;
+
+        // 產生預設 A1 ~ A7，各 10 樓資料
+        function generateDefaultUnits() {
+            const buildings = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
+            const defaultAreas = [36.5, 42.0, 38.5, 45.2, 33.8, 40.0, 39.5];
+            const list = [];
+            buildings.forEach((bldg, idx) => {
+                const area = defaultAreas[idx] || 36.0;
+                for (let f = 1; f <= 10; f++) {
+                    list.push({
+                        id: `${bldg}-${f}F`,
+                        building: bldg,
+                        floor: f,
+                        area: area,
+                        attended: false,
+                        voted: false
+                    });
+                }
+            });
+            return list;
+        }
+
+        // 儲存至本地 localStorage (背景自動儲存，不彈干擾視窗)
+        function saveStateToLocal() {
+            try {
+                const key = getFileStorageKey();
+                localStorage.setItem(key, JSON.stringify(appState));
+                const badge = document.getElementById('auto-save-status');
+                if (badge) {
+                    const now = new Date();
+                    const timeStr = now.toTimeString().split(' ')[0];
+                    badge.innerText = `✓ 已自動儲存 (${timeStr})`;
+                }
+            } catch (err) {
+                console.error('儲存失敗:', err);
+            }
+        }
+
+        // 手動點擊「儲存進度」按鈕：僅提示「儲存成功」
+        function manualSave() {
+            saveStateToLocal();
+            showMsgModal('💾 儲存成功');
+        }
+
+        // 載入進度
+        function loadStateFromLocal() {
+            try {
+                const key = getFileStorageKey();
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && Array.isArray(parsed.units)) {
+                        appState = {
+                            communityName: (parsed.communityName && parsed.communityName !== '華京大廈社區') ? parsed.communityName : '社區名稱',
+                            agendaTitle: (parsed.agendaTitle && parsed.agendaTitle !== '第一案：社區規約修訂討論案') ? parsed.agendaTitle : '議案名稱',
+                            units: parsed.units
+                        };
+                        return;
+                    }
+                }
+            } catch (err) {
+                console.error('讀取存檔失敗，使用預設清單:', err);
+            }
+            // 若無存檔，初始化 A1~A7 各 10 樓
+            appState.units = generateDefaultUnits();
+            saveStateToLocal();
+        }
+
+        // 清空全部戶別視窗控制
+        function openClearAllUnitsModal() {
+            const modal = document.getElementById('clear-all-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeClearAllUnitsModal() {
+            const modal = document.getElementById('clear-all-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function executeClearAllUnits() {
+            appState.units = [];
+            saveStateToLocal();
+            renderAll();
+            closeClearAllUnitsModal();
+        }
+
+        // 確認並載入範例資料 (A1~A7 各 10 樓)
+        function confirmLoadSampleData() {
+            openConfirmActionModal({
+                icon: '🔄',
+                iconBg: 'bg-amber-100 text-amber-700',
+                title: '確定要載入範例資料 (A1~A7) 嗎？',
+                desc: '此操作將會以預設範例（A1～A7，各 10 樓，共 70 戶）覆蓋目前的戶別清單與統計進度。',
+                btnText: '確定載入範例',
+                btnColor: 'bg-amber-600 hover:bg-amber-700',
+                onConfirm: () => loadSampleData(true)
+            });
+        }
+
+        // 載入範例資料 (A1~A7 各 10 樓)
+        function loadSampleData(showPrompt = false) {
+            appState.units = generateDefaultUnits();
+            saveStateToLocal();
+            switchTab('attendance');
+            if (showPrompt) {
+                showMsgModal('已載入預設範例（A1～A7，各 10 樓，共 70 戶）');
+            }
+        }
+
+        // 更新社區名稱
+        function updateCommunityName(val) {
+            const clean = val.trim() || '社區名稱';
+            appState.communityName = clean;
+            document.getElementById('stat-community-badge').innerText = clean;
+            document.getElementById('footer-community-name').innerText = clean;
+            saveStateToLocal();
+        }
+
+        // 更新議案名稱
+        function updateAgendaTitle(val) {
+            appState.agendaTitle = val;
+            saveStateToLocal();
+        }
+
+        // 切換頁籤
+        function switchTab(tab) {
+            const pages = ['attendance', 'voting', 'guide'];
+            pages.forEach(p => {
+                const section = document.getElementById(`page-${p}`);
+                const btn = document.getElementById(`tab-btn-${p}`);
+                if (p === tab) {
+                    section.classList.remove('hidden');
+                    btn.className = "px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold transition whitespace-nowrap bg-white text-blue-600 shadow-sm";
+                } else {
+                    section.classList.add('hidden');
+                    btn.className = "px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold transition whitespace-nowrap text-slate-600 hover:text-slate-900";
+                }
+            });
+            renderAll();
+        }
+
+        // 將戶別依棟別分組
+        function groupByBuilding() {
+            const grouped = {};
+            appState.units.forEach(u => {
+                if (!grouped[u.building]) grouped[u.building] = [];
+                grouped[u.building].push(u);
+            });
+            return grouped;
+        }
+
+        // 渲染第一頁：出席點名矩陣 (自適應寬度 minmax(0, 1fr)，無橫向捲軸)
+        function renderAttendanceMatrix() {
+            const container = document.getElementById('attendance-matrix');
+            container.innerHTML = '';
+            const grouped = groupByBuilding();
+            const buildings = Object.keys(grouped).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+            if (buildings.length === 0) {
+                container.innerHTML = `<div class="text-center py-10 text-slate-400 font-bold">目前尚無戶別資料，請點擊右上方「匯入名單 Excel」、「批量新增」或至「使用說明」載入範例</div>`;
+                return;
+            }
+
+            buildings.forEach(bldg => {
+                const bldgUnits = grouped[bldg].sort((a, b) => a.floor - b.floor);
+                const rowDiv = document.createElement('div');
+                rowDiv.className = "flex items-center gap-1.5 md:gap-2 w-full";
+
+                // 左側戶型按鈕：點擊開啟第一頁六大管理選單
+                const labelBtn = document.createElement('button');
+                labelBtn.type = "button";
+                labelBtn.className = "flex-shrink-0 w-11 md:w-14 h-11 md:h-12 bg-slate-800 hover:bg-slate-700 active:scale-95 text-white font-bold text-xs md:text-sm rounded-xl flex items-center justify-center shadow-sm cursor-pointer transition";
+                labelBtn.title = `點擊開啟【${bldg}】戶型管理選單`;
+                labelBtn.innerText = bldg;
+                labelBtn.onclick = () => openBuildingActionModal(bldg);
+                rowDiv.appendChild(labelBtn);
+
+                // 右側樓層按鈕列：隨螢幕解析度與該棟樓層數量自動調整寬度
+                const gridDiv = document.createElement('div');
+                gridDiv.className = "grid gap-1 md:gap-1.5 flex-1 w-full";
+                gridDiv.style.gridTemplateColumns = `repeat(${bldgUnits.length}, minmax(0, 1fr))`;
+
+                bldgUnits.forEach(unit => {
+                    const btn = document.createElement('button');
+                    btn.type = "button";
+                    const isAtt = unit.attended;
+                    btn.className = `unit-btn h-11 md:h-12 rounded-xl border flex flex-col items-center justify-center px-0.5 overflow-hidden ${
+                        isAtt 
+                        ? 'bg-emerald-500 border-emerald-600 text-white shadow-sm' 
+                        : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                    }`;
+                    btn.innerHTML = `
+                        <span class="font-extrabold text-[11px] md:text-xs leading-tight truncate w-full text-center">${unit.floor}F</span>
+                        <span class="text-[9px] md:text-[10px] leading-tight opacity-85 truncate w-full text-center">${Number(unit.area).toFixed(1)}</span>
+                    `;
+                    btn.onclick = () => toggleUnitAttendance(unit.id);
+                    gridDiv.appendChild(btn);
+                });
+
+                rowDiv.appendChild(gridDiv);
+                container.appendChild(rowDiv);
+            });
+        }
+
+        // 渲染第二頁：議案投票矩陣
+        function renderVotingMatrix() {
+            const container = document.getElementById('voting-matrix');
+            container.innerHTML = '';
+            const grouped = groupByBuilding();
+            const buildings = Object.keys(grouped).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+            buildings.forEach(bldg => {
+                const bldgUnits = grouped[bldg].sort((a, b) => a.floor - b.floor);
+                const rowDiv = document.createElement('div');
+                rowDiv.className = "flex items-center gap-1.5 md:gap-2 w-full";
+
+                // 左側戶型按鈕：在投票頁點擊時，僅開啟「選擇某樓層標示為已出席」視窗
+                const labelBtn = document.createElement('button');
+                labelBtn.type = "button";
+                labelBtn.className = "flex-shrink-0 w-11 md:w-14 h-11 md:h-12 bg-slate-800 hover:bg-slate-700 active:scale-95 text-white font-bold text-xs md:text-sm rounded-xl flex items-center justify-center shadow-sm cursor-pointer transition";
+                labelBtn.title = `點擊選擇【${bldg}】樓層標示為已出席`;
+                labelBtn.innerText = bldg;
+                labelBtn.onclick = () => openVotingBuildingModal(bldg);
+                rowDiv.appendChild(labelBtn);
+
+                const gridDiv = document.createElement('div');
+                gridDiv.className = "grid gap-1 md:gap-1.5 flex-1 w-full";
+                gridDiv.style.gridTemplateColumns = `repeat(${bldgUnits.length}, minmax(0, 1fr))`;
+
+                bldgUnits.forEach(unit => {
+                    const btn = document.createElement('button');
+                    btn.type = "button";
+                    if (!unit.attended) {
+                        btn.className = "h-11 md:h-12 rounded-xl border border-slate-200 bg-slate-100 text-slate-300 flex flex-col items-center justify-center px-0.5 cursor-not-allowed overflow-hidden";
+                        btn.innerHTML = `
+                            <span class="font-bold text-[11px] md:text-xs leading-tight">${unit.floor}F</span>
+                            <span class="text-[9px] leading-tight">未出席</span>
+                        `;
+                    } else {
+                        const isVoted = unit.voted;
+                        btn.className = `unit-btn h-11 md:h-12 rounded-xl border-2 flex flex-col items-center justify-center px-0.5 overflow-hidden ${
+                            isVoted
+                            ? 'bg-blue-600 border-blue-700 text-white shadow-sm'
+                            : 'bg-white hover:bg-blue-50 border-slate-300 text-slate-700'
+                        }`;
+                        btn.innerHTML = `
+                            <span class="font-extrabold text-[11px] md:text-xs leading-tight">${unit.floor}F</span>
+                            <span class="text-[9px] md:text-[10px] leading-tight font-bold">${isVoted ? '✓ 同意' : Number(unit.area).toFixed(1)}</span>
+                        `;
+                        btn.onclick = () => toggleUnitVote(unit.id);
+                    }
+                    gridDiv.appendChild(btn);
+                });
+
+                rowDiv.appendChild(gridDiv);
+                container.appendChild(rowDiv);
+            });
+        }
+
+        // 切換單一戶別出席狀態
+        function toggleUnitAttendance(unitId) {
+            const target = appState.units.find(u => u.id === unitId);
+            if (!target) return;
+            target.attended = !target.attended;
+            if (!target.attended) {
+                target.voted = false; // 取消出席時同步取消同意票
+            }
+            saveStateToLocal();
+            renderAll();
+        }
+
+        // 切換單一戶別同意票狀態
+        function toggleUnitVote(unitId) {
+            const target = appState.units.find(u => u.id === unitId);
+            if (!target || !target.attended) return;
+            target.voted = !target.voted;
+            saveStateToLocal();
+            renderAll();
+        }
+
+        // 通用確認彈窗狀態與控制
+        let pendingConfirmCallback = null;
+
+        function openConfirmActionModal({ icon, iconBg, title, desc, btnText, btnColor, onConfirm }) {
+            document.getElementById('confirm-action-icon').innerText = icon || '❓';
+            document.getElementById('confirm-action-icon').className = `w-12 h-12 rounded-full flex items-center justify-center mx-auto text-2xl ${iconBg || 'bg-blue-100 text-blue-600'}`;
+            document.getElementById('confirm-action-title').innerText = title;
+            document.getElementById('confirm-action-desc').innerText = desc;
+
+            const submitBtn = document.getElementById('confirm-action-submit-btn');
+            submitBtn.innerText = btnText || '確定';
+            submitBtn.className = `flex-1 py-2.5 text-white font-bold rounded-xl text-sm transition ${btnColor || 'bg-blue-600 hover:bg-blue-700'}`;
+
+            pendingConfirmCallback = onConfirm;
+
+            const modal = document.getElementById('confirm-action-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeConfirmActionModal() {
+            const modal = document.getElementById('confirm-action-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            pendingConfirmCallback = null;
+        }
+
+        function executeConfirmedAction() {
+            if (typeof pendingConfirmCallback === 'function') {
+                pendingConfirmCallback();
+            }
+            closeConfirmActionModal();
+        }
+
+        // 確認：全體標示出席 / 全體取消出席
+        function confirmMarkAllAttendance(status) {
+            if (status) {
+                openConfirmActionModal({
+                    icon: '✅',
+                    iconBg: 'bg-emerald-100 text-emerald-600',
+                    title: '確定要將「全體標示出席」嗎？',
+                    desc: '此操作會將目前清單中的所有戶別全部設為「已出席」狀態。',
+                    btnText: '確定全體出席',
+                    btnColor: 'bg-emerald-600 hover:bg-emerald-700',
+                    onConfirm: () => markAllAttendance(true)
+                });
+            } else {
+                openConfirmActionModal({
+                    icon: '⚠️',
+                    iconBg: 'bg-rose-100 text-rose-600',
+                    title: '確定要「全體取消出席」嗎？',
+                    desc: '此操作會將所有戶別重設為「未出席」狀態，且同時清除已勾選的同意票。',
+                    btnText: '確定全體取消',
+                    btnColor: 'bg-rose-600 hover:bg-rose-700',
+                    onConfirm: () => markAllAttendance(false)
+                });
+            }
+        }
+
+        // 確認：已出席全數同意 / 清空本案投票
+        function confirmMarkAllVotes(status) {
+            if (status) {
+                openConfirmActionModal({
+                    icon: '🗳️',
+                    iconBg: 'bg-blue-100 text-blue-600',
+                    title: '確定要將「已出席全數同意」嗎？',
+                    desc: '此操作會將目前所有已出席的戶別全部標示為「同意票」。',
+                    btnText: '確定全數同意',
+                    btnColor: 'bg-blue-600 hover:bg-blue-700',
+                    onConfirm: () => markAllVotes(true)
+                });
+            } else {
+                openConfirmActionModal({
+                    icon: '⚠️',
+                    iconBg: 'bg-rose-100 text-rose-600',
+                    title: '確定要「清空本案投票」嗎？',
+                    desc: '此操作會將本議案目前已勾選的所有同意票全部歸零（不影響出席狀態）。',
+                    btnText: '確定清空投票',
+                    btnColor: 'bg-rose-600 hover:bg-rose-700',
+                    onConfirm: () => markAllVotes(false)
+                });
+            }
+        }
+
+        // 全體出席/取消
+        function markAllAttendance(status) {
+            appState.units.forEach(u => {
+                u.attended = status;
+                if (!status) u.voted = false;
+            });
+            saveStateToLocal();
+            renderAll();
+        }
+
+        // 已出席全數同意/清空投票
+        function markAllVotes(status) {
+            appState.units.forEach(u => {
+                if (u.attended) u.voted = status;
+            });
+            saveStateToLocal();
+            renderAll();
+        }
+
+        // 統一更新門檻卡片樣式 (未達標無色中性灰，已達標打勾並顯示醒目翠綠色)
+        function updateThresholdBoxUI(boxId, titleId, reqId, statusId, isMet, reqText, countPct, areaPct) {
+            const box = document.getElementById(boxId);
+            const title = document.getElementById(titleId);
+            const req = document.getElementById(reqId);
+            const status = document.getElementById(statusId);
+
+            req.innerText = reqText;
+
+            if (isMet) {
+                box.className = "rounded-xl p-3.5 border-2 border-emerald-500 bg-emerald-50/90 shadow-sm transition";
+                title.className = "font-extrabold text-sm text-emerald-950";
+                req.className = "text-xs font-bold text-emerald-800 mt-1";
+                status.className = "text-xs md:text-sm font-black text-emerald-700 mt-1";
+                status.innerText = `✅ 已達標 ( 人數 ${countPct.toFixed(2)}% / 面積 ${areaPct.toFixed(2)}% )`;
+            } else {
+                box.className = "rounded-xl p-3.5 border border-slate-200 bg-slate-50 transition";
+                title.className = "font-extrabold text-sm text-slate-700";
+                req.className = "text-xs font-bold text-slate-500 mt-1";
+                status.className = "text-xs md:text-sm font-bold text-slate-500 mt-1";
+                status.innerText = `○ 未達標 ( 人數 ${countPct.toFixed(2)}% / 面積 ${areaPct.toFixed(2)}% )`;
+            }
+        }
+
+        // 計算並更新第一頁與第二頁的統計與門檻
+        function updateStatistics() {
+            const totalCount = appState.units.length;
+            const totalArea = appState.units.reduce((sum, u) => sum + Number(u.area || 0), 0);
+
+            const presentUnits = appState.units.filter(u => u.attended);
+            const presentCount = presentUnits.length;
+            const presentArea = presentUnits.reduce((sum, u) => sum + Number(u.area || 0), 0);
+
+            const attCountPct = totalCount > 0 ? (presentCount / totalCount) * 100 : 0;
+            const attAreaPct = totalArea > 0 ? (presentArea / totalArea) * 100 : 0;
+
+            // 更新第一頁數字
+            document.getElementById('att-present-count').innerText = presentCount;
+            document.getElementById('att-total-count').innerText = totalCount;
+            document.getElementById('att-count-pct').innerText = `${attCountPct.toFixed(2)}%`;
+
+            document.getElementById('att-present-area').innerText = presentArea.toFixed(2);
+            document.getElementById('att-total-area').innerText = totalArea.toFixed(2);
+            document.getElementById('att-area-pct').innerText = `${attAreaPct.toFixed(2)}%`;
+
+            // 計算第一頁各門檻應到人數與面積
+            // 1. 三分之二門檻 (>= 2/3)
+            const reqCount2_3 = totalCount > 0 ? Math.ceil((totalCount * 2) / 3) : 0;
+            const reqArea2_3 = (totalArea * 2) / 3;
+            const met2_3 = totalCount > 0 && (presentCount >= reqCount2_3) && (presentArea + 1e-9 >= reqArea2_3);
+            updateThresholdBoxUI(
+                'box-thresh-2-3', 'title-thresh-2-3', 'req-thresh-2-3', 'status-thresh-2-3',
+                met2_3,
+                `應到門檻：${reqCount2_3} 戶 / 面積 ${reqArea2_3.toFixed(2)}`,
+                attCountPct, attAreaPct
+            );
+
+            // 2. 二分之一門檻 (> 50%，過半數)
+            const reqCount1_2 = totalCount > 0 ? Math.floor(totalCount / 2) + 1 : 0;
+            const reqArea1_2 = totalArea / 2;
+            const met1_2 = totalCount > 0 && (presentCount >= reqCount1_2) && (presentArea > reqArea1_2);
+            updateThresholdBoxUI(
+                'box-thresh-1-2', 'title-thresh-1-2', 'req-thresh-1-2', 'status-thresh-1-2',
+                met1_2,
+                `應到門檻：${reqCount1_2} 戶 / 面積 > ${reqArea1_2.toFixed(2)}`,
+                attCountPct, attAreaPct
+            );
+
+            // 3. 五分之一門檻 (>= 1/5)
+            const reqCount1_5 = totalCount > 0 ? Math.ceil(totalCount / 5) : 0;
+            const reqArea1_5 = totalArea / 5;
+            const met1_5 = totalCount > 0 && (presentCount >= reqCount1_5) && (presentArea + 1e-9 >= reqArea1_5);
+            updateThresholdBoxUI(
+                'box-thresh-1-5', 'title-thresh-1-5', 'req-thresh-1-5', 'status-thresh-1-5',
+                met1_5,
+                `應到門檻：${reqCount1_5} 戶 / 面積 ${reqArea1_5.toFixed(2)}`,
+                attCountPct, attAreaPct
+            );
+
+            // ================= 第二頁：議案投票統計 (以本次會議出席總數為分母) =================
+            const agreedUnits = presentUnits.filter(u => u.voted);
+            const agreeCount = agreedUnits.length;
+            const agreeArea = agreedUnits.reduce((sum, u) => sum + Number(u.area || 0), 0);
+
+            const voteCountPct = presentCount > 0 ? (agreeCount / presentCount) * 100 : 0;
+            const voteAreaPct = presentArea > 0 ? (agreeArea / presentArea) * 100 : 0;
+
+            document.getElementById('vote-agree-count').innerText = agreeCount;
+            document.getElementById('vote-present-count').innerText = presentCount;
+            document.getElementById('vote-count-pct').innerText = `${voteCountPct.toFixed(2)}%`;
+
+            document.getElementById('vote-agree-area').innerText = agreeArea.toFixed(2);
+            document.getElementById('vote-present-area').innerText = presentArea.toFixed(2);
+            document.getElementById('vote-area-pct').innerText = `${voteAreaPct.toFixed(2)}%`;
+
+            // 決議門檻一：四分之三 (>= 75%)
+            const reqVoteCount3_4 = presentCount > 0 ? Math.ceil((presentCount * 3) / 4) : 0;
+            const reqVoteArea3_4 = (presentArea * 3) / 4;
+            const metVote3_4 = presentCount > 0 && (agreeCount >= reqVoteCount3_4) && (agreeArea + 1e-9 >= reqVoteArea3_4);
+            updateThresholdBoxUI(
+                'box-vote-3-4', 'title-vote-3-4', 'req-vote-3-4', 'status-vote-3-4',
+                metVote3_4,
+                `應同意門檻：${reqVoteCount3_4} 戶 / 面積 ${reqVoteArea3_4.toFixed(2)}`,
+                voteCountPct, voteAreaPct
+            );
+
+            // 決議門檻二：二分之一 (> 50%)
+            const reqVoteCount1_2 = presentCount > 0 ? Math.floor(presentCount / 2) + 1 : 0;
+            const reqVoteArea1_2 = presentArea / 2;
+            const metVote1_2 = presentCount > 0 && (agreeCount >= reqVoteCount1_2) && (agreeArea > reqVoteArea1_2);
+            updateThresholdBoxUI(
+                'box-vote-1-2', 'title-vote-1-2', 'req-vote-1-2', 'status-vote-1-2',
+                metVote1_2,
+                `應同意門檻：${reqVoteCount1_2} 戶 / 面積 > ${reqVoteArea1_2.toFixed(2)}`,
+                voteCountPct, voteAreaPct
+            );
+        }
+
+        // 統一重繪
+        function renderAll() {
+            document.getElementById('community-name-input').value = appState.communityName;
+            document.getElementById('stat-community-badge').innerText = appState.communityName;
+            document.getElementById('footer-community-name').innerText = appState.communityName;
+            document.getElementById('agenda-title-input').value = appState.agendaTitle;
+            renderAttendanceMatrix();
+            renderVotingMatrix();
+            updateStatistics();
+        }
+
+        // ==================== 第一頁：戶型 (A1~A7) 六項管理選單邏輯 ====================
+        function openBuildingActionModal(bldg) {
+            currentManagingBuilding = bldg;
+            document.getElementById('bldg-modal-title').innerText = bldg;
+            backToBldgActionList();
+            const modal = document.getElementById('bldg-action-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeBuildingActionModal() {
+            const modal = document.getElementById('bldg-action-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function backToBldgActionList() {
+            document.getElementById('bldg-action-list').classList.remove('hidden');
+            document.getElementById('bldg-sub-delete-floor').classList.add('hidden');
+            document.getElementById('bldg-sub-confirm-delete').classList.add('hidden');
+        }
+
+        // 功能一 & 二：將該戶型所有樓層標示/取消已出席
+        function bldgActionMarkAll(status) {
+            if (!currentManagingBuilding) return;
+            appState.units.forEach(u => {
+                if (u.building === currentManagingBuilding) {
+                    u.attended = status;
+                    if (!status) u.voted = false;
+                }
+            });
+            saveStateToLocal();
+            renderAll();
+            closeBuildingActionModal();
+        }
+
+        // 功能三：刪除該戶型的某一樓層
+        function bldgActionShowDeleteFloor() {
+            document.getElementById('bldg-action-list').classList.add('hidden');
+            const sub = document.getElementById('bldg-sub-delete-floor');
+            sub.classList.remove('hidden');
+
+            const grid = document.getElementById('bldg-delete-floor-grid');
+            grid.innerHTML = '';
+            const floors = appState.units
+                .filter(u => u.building === currentManagingBuilding)
+                .sort((a, b) => a.floor - b.floor);
+
+            floors.forEach(u => {
+                const btn = document.createElement('button');
+                btn.type = "button";
+                btn.className = "py-2 px-1 bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 border border-rose-200 rounded-xl font-extrabold text-xs transition";
+                btn.innerText = `${u.floor}F`;
+                btn.onclick = () => {
+                    appState.units = appState.units.filter(item => item.id !== u.id);
+                    saveStateToLocal();
+                    renderAll();
+                    // 若該棟已無樓層則關閉視窗，否則刷新樓層清單
+                    const remain = appState.units.filter(item => item.building === currentManagingBuilding);
+                    if (remain.length === 0) {
+                        closeBuildingActionModal();
+                    } else {
+                        bldgActionShowDeleteFloor();
+                    }
+                };
+                grid.appendChild(btn);
+            });
+        }
+
+        // 功能四：刪除該戶型
+        function bldgActionConfirmDeleteBldg() {
+            document.getElementById('bldg-action-list').classList.add('hidden');
+            document.getElementById('bldg-confirm-del-name').innerText = currentManagingBuilding;
+            document.getElementById('bldg-sub-confirm-delete').classList.remove('hidden');
+        }
+
+        function executeDeleteBuilding() {
+            if (!currentManagingBuilding) return;
+            appState.units = appState.units.filter(u => u.building !== currentManagingBuilding);
+            saveStateToLocal();
+            renderAll();
+            closeBuildingActionModal();
+        }
+
+        // 功能五：新增該戶型某一樓
+        function bldgActionOpenSingleAdd() {
+            const bldg = currentManagingBuilding;
+            closeBuildingActionModal();
+            const existingFloors = appState.units.filter(u => u.building === bldg).map(u => u.floor);
+            const nextFloor = existingFloors.length > 0 ? Math.max(...existingFloors) + 1 : 1;
+            const defaultArea = existingFloors.length > 0 ? appState.units.find(u => u.building === bldg).area : 35.5;
+            openSingleAddModal(bldg, nextFloor, defaultArea);
+        }
+
+        // 功能六：批量新增該戶型樓層
+        function bldgActionOpenBatchAdd() {
+            const bldg = currentManagingBuilding;
+            closeBuildingActionModal();
+            const existingFloors = appState.units.filter(u => u.building === bldg).map(u => u.floor);
+            const startFloor = existingFloors.length > 0 ? Math.max(...existingFloors) + 1 : 1;
+            const defaultArea = existingFloors.length > 0 ? appState.units.find(u => u.building === bldg).area : 35.5;
+            openBatchAddModal(bldg, startFloor, startFloor + 4, defaultArea);
+        }
+
+        // ==================== 第二頁：點擊戶型選擇某樓層標示為已出席 ====================
+        function openVotingBuildingModal(bldg) {
+            currentManagingBuilding = bldg;
+            document.getElementById('voting-bldg-modal-title').innerText = bldg;
+            renderVotingBuildingFloorGrid();
+            const modal = document.getElementById('voting-bldg-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function renderVotingBuildingFloorGrid() {
+            const grid = document.getElementById('voting-bldg-floor-grid');
+            grid.innerHTML = '';
+            const floors = appState.units
+                .filter(u => u.building === currentManagingBuilding)
+                .sort((a, b) => a.floor - b.floor);
+
+            floors.forEach(u => {
+                const btn = document.createElement('button');
+                btn.type = "button";
+                btn.className = u.attended
+                    ? "py-2.5 px-1 bg-emerald-500 text-white border border-emerald-600 rounded-xl font-extrabold text-xs shadow-xs transition"
+                    : "py-2.5 px-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl font-bold text-xs transition";
+                btn.innerHTML = `${u.floor}F<br><span class="text-[10px] font-normal">${u.attended ? '✓ 已出席' : '未出席'}</span>`;
+                btn.onclick = () => {
+                    u.attended = !u.attended;
+                    if (!u.attended) u.voted = false;
+                    saveStateToLocal();
+                    renderAll();
+                    renderVotingBuildingFloorGrid();
+                };
+                grid.appendChild(btn);
+            });
+        }
+
+        function closeVotingBuildingModal() {
+            const modal = document.getElementById('voting-bldg-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        // ==================== 單筆與批量新增視窗邏輯 ====================
+        function openSingleAddModal(bldg = 'A1', floor = 11, area = 35.5) {
+            document.getElementById('single-bldg-input').value = bldg;
+            document.getElementById('single-floor-input').value = floor;
+            document.getElementById('single-area-input').value = area;
+            const modal = document.getElementById('single-add-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeSingleAddModal() {
+            const modal = document.getElementById('single-add-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function submitSingleAdd() {
+            const bldg = document.getElementById('single-bldg-input').value.trim().toUpperCase();
+            const floor = parseInt(document.getElementById('single-floor-input').value, 10);
+            const area = parseFloat(document.getElementById('single-area-input').value);
+
+            if (!bldg || isNaN(floor) || isNaN(area) || area <= 0) {
+                showMsgModal('請輸入有效的戶型、樓層與專有面積！');
+                return;
+            }
+
+            const id = `${bldg}-${floor}F`;
+            const existing = appState.units.find(u => u.id === id);
+            if (existing) {
+                existing.area = area;
+            } else {
+                appState.units.push({
+                    id,
+                    building: bldg,
+                    floor,
+                    area,
+                    attended: false,
+                    voted: false
+                });
+            }
+            saveStateToLocal();
+            renderAll();
+            closeSingleAddModal();
+        }
+
+        function openBatchAddModal(bldg = 'A8', startF = 1, endF = 10, area = 35.5) {
+            document.getElementById('batch-bldg-input').value = bldg;
+            document.getElementById('batch-start-floor').value = startF;
+            document.getElementById('batch-end-floor').value = endF;
+            document.getElementById('batch-area-input').value = area;
+            const modal = document.getElementById('batch-add-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeBatchAddModal() {
+            const modal = document.getElementById('batch-add-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function submitBatchAdd() {
+            const bldg = document.getElementById('batch-bldg-input').value.trim().toUpperCase();
+            const startF = parseInt(document.getElementById('batch-start-floor').value, 10);
+            const endF = parseInt(document.getElementById('batch-end-floor').value, 10);
+            const area = parseFloat(document.getElementById('batch-area-input').value);
+
+            if (!bldg || isNaN(startF) || isNaN(endF) || startF > endF || isNaN(area) || area <= 0) {
+                showMsgModal('請確認輸入的棟別、起訖樓層與面積是否正確！');
+                return;
+            }
+
+            for (let f = startF; f <= endF; f++) {
+                const id = `${bldg}-${f}F`;
+                const existing = appState.units.find(u => u.id === id);
+                if (existing) {
+                    existing.area = area;
+                } else {
+                    appState.units.push({
+                        id,
+                        building: bldg,
+                        floor: f,
+                        area,
+                        attended: false,
+                        voted: false
+                    });
+                }
+            }
+            saveStateToLocal();
+            renderAll();
+            closeBatchAddModal();
+        }
+
+        // ==================== Excel 範本下載與匯入 (含匯入戶數及總面積提示) ====================
+        function downloadExcelTemplate() {
+            const sampleRows = [
+                { '戶型(棟別)': 'A1', '樓層': 1, '專有面積': 36.5 },
+                { '戶型(棟別)': 'A1', '樓層': 2, '專有面積': 36.5 },
+                { '戶型(棟別)': 'A2', '樓層': 1, '專有面積': 42.0 },
+                { '戶型(棟別)': 'A2', '樓層': 2, '專有面積': 42.0 }
+            ];
+            const ws = XLSX.utils.json_to_sheet(sampleRows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '社區戶數名單範本');
+            XLSX.writeFile(wb, `${appState.communityName}_名單範本.xlsx`);
+        }
+
+        function importExcel(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(firstSheet);
+
+                    const importedUnits = [];
+                    rows.forEach(r => {
+                        const bldg = String(r['戶型(棟別)'] || r['棟別'] || r['戶型'] || r['Building'] || '').trim().toUpperCase();
+                        const floorRaw = String(r['樓層'] || r['Floor'] || '').replace(/[^0-9]/g, '');
+                        const floor = parseInt(floorRaw, 10);
+                        const area = parseFloat(r['專有面積'] || r['面積'] || r['Area'] || 0);
+
+                        if (bldg && !isNaN(floor) && !isNaN(area) && area > 0) {
+                            importedUnits.push({
+                                id: `${bldg}-${floor}F`,
+                                building: bldg,
+                                floor: floor,
+                                area: area,
+                                attended: false,
+                                voted: false
+                            });
+                        }
+                    });
+
+                    if (importedUnits.length === 0) {
+                        showMsgModal('匯入失敗：找不到有效欄位，請確認包含「戶型(棟別)」、「樓層」、「專有面積」欄位。');
+                        return;
+                    }
+
+                    appState.units = importedUnits;
+                    const totalImportedArea = importedUnits.reduce((sum, u) => sum + u.area, 0);
+                    saveStateToLocal();
+                    renderAll();
+
+                    // 彈出提示匯入幾戶及總面積
+                    showMsgModal(`✅ 名單匯入成功！\n共匯入：${importedUnits.length} 戶\n總專有面積：${totalImportedArea.toFixed(2)}`);
+                } catch (err) {
+                    console.error(err);
+                    showMsgModal('Excel 檔案解析失敗，請確認檔案格式正確。');
+                } finally {
+                    event.target.value = '';
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // ==================== 通用提示視窗控制 ====================
+        function showMsgModal(text) {
+            document.getElementById('msg-modal-text').innerText = text;
+            const modal = document.getElementById('msg-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeMsgModal() {
+            const modal = document.getElementById('msg-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        // 啟動初始化
+        window.onload = function() {
+            loadStateFromLocal();
+            renderAll();
+        };
+    </script>
+</body>
+</html>
